@@ -41,7 +41,7 @@ If you didn't set it as default in step 3, assign it per-channel: Channels → E
    |---|---|
    | **Name** | `Profilarr` |
    | **Command** | `/data/profilarr/profilarr.sh` |
-   | **Parameters** | `'{userAgent}' '{streamUrl}'` |
+   | **Parameters** | `-ua {userAgent} -i {streamUrl}` |
    | **Active** | yes |
 
 3. Set it as the instance-wide default (Settings → Stream Settings → Default Stream Profile) or per-channel under Channels → Edit → Stream Profile.
