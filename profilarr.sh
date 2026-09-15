@@ -1,0 +1,2 @@
+#!/bin/sh
+cvlc --no-video-title-show --http-user-agent="$1" --network-caching=6000 --sout="#std{access=file,mux=ts,dst=-}" "$2" 2>/dev/null | ffmpeg -fflags +genpts+igndts -analyzeduration 5M -probesize 5M -i pipe:0 -c:v copy -c:a aac -b:a 128k -ac 2 -async 1 -mpegts_copyts 0 -muxdelay 0 -muxpreload 0 -avoid_negative_ts make_zero -mpegts_flags +resend_headers+pat_pmt_at_frames+initial_discontinuity -f mpegts pipe:1
