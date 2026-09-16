@@ -60,7 +60,7 @@ If either is missing, install it in whatever image/layer builds your Dispatcharr
 
 There are no environment-variable knobs. Every setting (`--network-caching`, ffmpeg flags, audio bitrate, etc.) is hardcoded directly in `profilarr.sh`. To change behavior, edit the script and, if installed via the plugin, use the **Reinstall script** action to push the change to `/data/profilarr/`.
 
-The script takes two **positional** arguments — `$1` is the user-agent, `$2` is the stream URL — matching the `'{userAgent}' '{streamUrl}'` order in Parameters above. It does not parse named flags; if you need to change the argument order, update both the Parameters field and the `$1`/`$2` references in the script together.
+The script takes two **positional** arguments — `$1` is the user-agent, `$2` is the stream URL — matching the `-ua {userAgent} -i {streamUrl} ` order in Parameters above. It does not parse named flags; if you need to change the argument order, update both the Parameters field and the `$1`/`$2` references in the script together.
 
 ## Troubleshooting
 
