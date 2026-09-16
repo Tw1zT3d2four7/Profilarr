@@ -2,7 +2,7 @@
 
 Installs `profilarr.sh` into /data/profilarr/ on first load (and on upgrades),
 then exposes a "Generate Stream Profile" action that creates a StreamProfile
-row pointing at it. The script is a POSIX-sh one-liner (cvlc | ffmpeg) with
+row pointing at it. The script is a POSIX-sh one-liner (ffmpeg | cvlc) with
 no external tuning inputs — everything is hardcoded in the script itself.
 Edit the script directly and use the "Reinstall script" action to re-copy
 your changes into /data/profilarr/.
@@ -22,8 +22,8 @@ from core.models import StreamProfile
 
 class Plugin:
     name = "Profilarr"
-    version = "1.0.1"
-    description = "Hybrid cvlc + ffmpeg stream profile: cvlc pulls from the provider, ffmpeg remuxes and regenerates timestamps to clear up freezes on discontinuities"
+    version = "1.0.0"
+    description = "Hybrid ffmpeg + cvlc stream profile: ffmpeg fetches from the provider and regenerates timestamps, cvlc buffers and delivers the already-clean stream to clear up freezes on discontinuities"
     author = "Tw1zT3d2four7"
     help_url = "https://github.com/Tw1zT3d2four7/Profilarr"
 
