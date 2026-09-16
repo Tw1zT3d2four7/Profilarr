@@ -22,7 +22,7 @@ from core.models import StreamProfile
 
 class Plugin:
     name = "Profilarr"
-    version = "1.0.0"
+    version = "1.0.1"
     description = "Hybrid cvlc + ffmpeg stream profile: cvlc pulls from the provider, ffmpeg remuxes and regenerates timestamps to clear up freezes on discontinuities"
     author = "Tw1zT3d2four7"
     help_url = "https://github.com/Tw1zT3d2four7/Profilarr"
