@@ -19,7 +19,7 @@ A raw `cvlc --sout ... dst=-` pipe works most of the time, but on a provider CDN
 - `-user_agent` — sends the custom user-agent on ffmpeg's own HTTP request to the provider.
 - `-reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 5` — ffmpeg automatically retries the HTTP connection on a drop instead of stalling.
 - `-multiple_requests 1 -seekable 0` — tells ffmpeg this is a live, non-seekable stream, skipping wasted range-request probing.
-- `-fflags +genpts+igndts` — ignore the source's DTS and regenerate clean, monotonic PTS.
+- `-fflags +genpts+igndts+discardcorrupt` — ignore the source's DTS and regenerate clean, monotonic PTS.
 - `-c:v copy` — video is passed through untouched (no re-encode, no quality loss, minimal CPU).
 - `-c:a aac -b:a 128k -ac 2 -async 1` — audio is re-encoded to a normalized AAC stereo stream and re-synced against video, in case the source audio is malformed or the channel layout is inconsistent.
 - `-avoid_negative_ts make_zero` — any negative timestamp produced by a discontinuity gets clamped to zero instead of propagating.
