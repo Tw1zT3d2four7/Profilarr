@@ -1,0 +1,69 @@
+#!/bin/sh
+ffmpeg \
+-user_agent "$1" \
+-reconnect 1 \
+-reconnect_at_eof 1 \
+-reconnect_streamed 1 \
+-reconnect_delay_max 5 \
+-multiple_requests 1 \
+-seekable 0 \
+-fflags +genpts+igndts+discardcorrupt \
+-analyzeduration 5M \
+-probesize 5M \
+-i "$2" \
+-map 0:v:0 \
+-map 0:a:0 \
+-c:v copy \
+-c:a aac \
+-b:a 128k \
+-ac 2 \
+-async 1 \
+-mpegts_copyts 0 \
+-avoid_negative_ts make_zero \
+-muxdelay 0 \
+-muxpreload 0 \
+-mpegts_flags +resend_headers+pat_pmt_at_frames+initial_discontinuity \
+-f mpegts pipe:1 2>/dev/null | \
+ffmpeg \
+-fflags +discardcorrupt+genpts \
+-probesize 512K \
+-analyzeduration 1M \
+-i pipe:0 \
+-map 0:v:0? \
+-map 0:a? \
+-sn -dn \
+-vf fps=30000/1001 \
+-fps_mode cfr \
+-c:v h264_nvenc \
+-preset p4 \
+-profile:v high \
+-pix_fmt yuv420p \
+-rc cbr \
+-b:v 8M \
+-maxrate 8M \
+-bufsize 16M \
+-g 60 \
+-keyint_min 60 \
+-sc_threshold 0 \
+-c:a aac \
+-b:a 384k \
+-max_muxing_queue_size 4096 \
+-flush_packets 1 \
+-mpegts_flags +pat_pmt_at_frames+resend_headers+initial_discontinuity \
+-f mpegts pipe:1 2>/dev/null | \
+cvlc \
+-I dummy \
+--no-lua \
+--no-auto-preparse \
+--no-dbus \
+--no-interact \
+--no-stats \
+--aout adummy \
+--vout vdummy \
+--no-sout-all \
+--sout-keep \
+--network-caching 3000 \
+--sout-mux-caching 1500 \
+--adaptive-logic=highest \
+--sout="#std{access=file,mux=ts,dst=-}" \
+fd://0
