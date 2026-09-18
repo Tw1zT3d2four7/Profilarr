@@ -1,7 +1,7 @@
 {
   "name": "Profilarr",
-  "version": "1.0.3",
-  "description": "Hybrid ffmpeg + cvlc stream profile: ffmpeg fetches from the provider and regenerates timestamps, cvlc buffers and delivers the already-clean stream to clear up freezes on discontinuities",
+  "version": "1.0.4",
+  "description": "Hybrid ffmpeg + cvlc stream profile with 4 selectable variants: a video-passthrough base and three NVENC transcode profiles (uncapped / 30fps-capped / 60fps-forced) chained after it.",
   "author": "Tw1zT3d2four7",
   "maintainers": ["Tw1zT3d2four7"],
   "min_dispatcharr_version": "v0.25.0",
