@@ -7,28 +7,10 @@ ffmpeg \
 -reconnect_delay_max 5 \
 -multiple_requests 1 \
 -seekable 0 \
--fflags +genpts+igndts+discardcorrupt \
--analyzeduration 5M \
--probesize 5M \
--i "$2" \
--map 0:v:0 \
--map 0:a:0 \
--c:v copy \
--c:a aac \
--b:a 128k \
--ac 2 \
--async 1 \
--mpegts_copyts 0 \
--avoid_negative_ts make_zero \
--muxdelay 0 \
--muxpreload 0 \
--mpegts_flags +resend_headers+pat_pmt_at_frames+initial_discontinuity \
--f mpegts pipe:1 2>/dev/null | \
-ffmpeg \
--fflags +discardcorrupt+genpts \
+-fflags +discardcorrupt+genpts+igndts \
 -probesize 512K \
 -analyzeduration 1M \
--i pipe:0 \
+-i "$2" \
 -map 0:v:0? \
 -map 0:a? \
 -sn -dn \
@@ -47,11 +29,17 @@ ffmpeg \
 -sc_threshold 0 \
 -c:a aac \
 -b:a 384k \
+-ac 2 \
+-async 1 \
+-mpegts_copyts 0 \
+-avoid_negative_ts make_zero \
+-muxdelay 0 \
+-muxpreload 0 \
 -max_muxing_queue_size 4096 \
 -flush_packets 1 \
 -mpegts_flags +pat_pmt_at_frames+resend_headers+initial_discontinuity \
 -f mpegts pipe:1 2>/dev/null | \
-cvlc \
+HOME=/home/dispatch cvlc \
 -I dummy \
 --no-lua \
 --no-auto-preparse \
