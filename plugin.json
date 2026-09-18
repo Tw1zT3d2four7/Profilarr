@@ -1,7 +1,7 @@
 {
   "name": "Profilarr",
-  "version": "1.0.5",
-  "description": "Hybrid ffmpeg + cvlc stream profile with 4 selectable variants: a video-passthrough base and three NVENC transcode profiles (uncapped / 30fps-capped / 60fps-forced) chained after it.",
+  "version": "1.0.6",
+  "description": "Hybrid ffmpeg + cvlc stream profile with 4 selectable variants and bundled process supervision.",
   "author": "Tw1zT3d2four7",
   "maintainers": ["Tw1zT3d2four7"],
   "min_dispatcharr_version": "v0.25.0",
