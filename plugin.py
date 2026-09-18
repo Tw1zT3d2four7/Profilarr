@@ -64,7 +64,7 @@ PROFILES = {
 
 class Plugin:
     name = "Profilarr"
-    version = "1.0.4"
+    version = "1.0.5"
     description = (
         "Hybrid ffmpeg + cvlc stream profile with 4 selectable variants: a "
         "video-passthrough base and three NVENC transcode profiles "
