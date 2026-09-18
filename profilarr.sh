@@ -25,7 +25,18 @@ ffmpeg \
 -mpegts_flags +resend_headers+pat_pmt_at_frames+initial_discontinuity \
 -f mpegts pipe:1 2>/dev/null | \
 cvlc \
---no-video-title-show \
---network-caching=6000 \
+-I dummy \
+--no-lua \
+--no-auto-preparse \
+--no-dbus \
+--no-interact \
+--no-stats \
+--aout adummy \
+--vout vdummy \
+--no-sout-all \
+--sout-keep \
+--network-caching 3000 \
+--sout-mux-caching 1500 \
+--adaptive-logic=highest \
 --sout="#std{access=file,mux=ts,dst=-}" \
 fd://0
