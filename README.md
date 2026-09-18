@@ -2,6 +2,8 @@
 
 [![license: MIT](https://img.shields.io/github/license/Tw1zT3d2four7/Profilarr)](LICENSE)
 
+Profilarr is a Dispatcharr ffmpeg/cvlc hybrid stream-profile plugin.
+
 A hybrid **stream profile for [Dispatcharr](https://github.com/Dispatcharr/Dispatcharr)**, shipped as four selectable variants. Every variant starts with the same `ffmpeg` fetch stage and ends with the same `cvlc` delivery stage; three of them insert an NVENC hardware transcode step in between.
 
 ```
