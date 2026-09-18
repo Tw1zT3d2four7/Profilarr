@@ -47,22 +47,52 @@ def terminate(proc):
 
 
 def ffmpeg_cmd(profile, ua, url):
+    # Core ingestion variables optimized for low latency and smooth recovery
     c = ["ffmpeg", "-user_agent", ua,
          "-reconnect", "1", "-reconnect_at_eof", "1", "-reconnect_streamed", "1",
          "-reconnect_delay_max", "5", "-multiple_requests", "1", "-seekable", "0",
-         "-fflags", "+discardcorrupt+genpts+igndts", "-probesize", "512K",
-         "-analyzeduration", "1M", "-i", url, "-map", "0:v:0?", "-map", "0:a?", "-sn", "-dn"]
+         "-fflags", "+discardcorrupt+genpts+igndts", 
+         "-probesize", "10M", 
+         "-analyzeduration", "5M", 
+         "-i", url, "-map", "0:v:0?", "-map", "0:a?", "-sn", "-dn"]
+    
+    # --- 1. Video and Audio Encoding Profiles ---
+    
+    # [DEFAULT PASSTHROUGH PROFILE]
     if profile == "passthrough":
-        c += ["-c:v", "copy", "-c:a", "aac", "-b:a", "128k", "-ac", "2", "-async", "1"]
+        c += ["-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-async", "1"]
+        
+    # [NVIDIA NVENC ENCODING PROFILES]
     elif profile == "uncapped":
-        c += ["-c:v", "h264_nvenc", "-preset", "p4", "-profile:v", "high", "-pix_fmt", "yuv420p", "-rc", "cbr", "-b:v", "8M", "-maxrate", "8M", "-bufsize", "16M", "-g", "60", "-keyint_min", "60", "-sc_threshold", "0", "-c:a", "aac", "-b:a", "384k", "-ac", "2", "-async", "1"]
+        c += ["-c:v", "h264_nvenc", "-preset", "p4", "-profile:v", "high", "-pix_fmt", "yuv420p", "-rc", "cbr", "-b:v", "8M", "-maxrate", "8M", "-bufsize", "16M", "-g", "60", "-keyint_min", "60", "-sc_threshold", "0", "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-async", "1"]
     elif profile == "fps30":
-        c += ["-vf", "fps=30000/1001", "-fps_mode", "cfr", "-c:v", "h264_nvenc", "-preset", "p4", "-profile:v", "high", "-pix_fmt", "yuv420p", "-rc", "cbr", "-b:v", "8M", "-maxrate", "8M", "-bufsize", "16M", "-g", "60", "-keyint_min", "60", "-sc_threshold", "0", "-c:a", "aac", "-b:a", "384k", "-ac", "2", "-async", "1"]
+        c += ["-vf", "fps=30000/1001", "-fps_mode", "cfr", "-c:v", "h264_nvenc", "-preset", "p4", "-profile:v", "high", "-pix_fmt", "yuv420p", "-rc", "cbr", "-b:v", "8M", "-maxrate", "8M", "-bufsize", "16M", "-g", "60", "-keyint_min", "60", "-sc_threshold", "0", "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-async", "1"]
     elif profile == "fps60":
-        c += ["-vf", "fps=60000/1001", "-fps_mode", "cfr", "-c:v", "h264_nvenc", "-preset", "p4", "-profile:v", "high", "-pix_fmt", "yuv420p", "-rc", "cbr", "-b:v", "8M", "-maxrate", "8M", "-bufsize", "16M", "-g", "120", "-keyint_min", "120", "-sc_threshold", "0", "-c:a", "aac", "-b:a", "384k", "-ac", "2", "-async", "1"]
+        c += ["-vf", "fps=60000/1001", "-fps_mode", "cfr", "-c:v", "h264_nvenc", "-preset", "p4", "-profile:v", "high", "-pix_fmt", "yuv420p", "-rc", "cbr", "-b:v", "8M", "-maxrate", "8M", "-bufsize", "16M", "-g", "120", "-keyint_min", "120", "-sc_threshold", "0", "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-async", "1"]
+        
+    # [CPU SOFTWARE ENCODING PROFILES (LIBX264 EQUIVALENTS)]
+    elif profile == "cpu_uncapped":
+        c += ["-c:v", "libx264", "-preset", "superfast", "-tune", "zerolatency", "-profile:v", "high", "-pix_fmt", "yuv420p", "-x264-params", "nal-hrd=cbr", "-b:v", "8M", "-maxrate", "8M", "-bufsize", "16M", "-g", "60", "-keyint_min", "60", "-sc_threshold", "0", "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-async", "1"]
+    elif profile == "cpu_fps30":
+        c += ["-vf", "fps=30000/1001", "-fps_mode", "cfr", "-c:v", "libx264", "-preset", "superfast", "-tune", "zerolatency", "-profile:v", "high", "-pix_fmt", "yuv420p", "-x264-params", "nal-hrd=cbr", "-b:v", "8M", "-maxrate", "8M", "-bufsize", "16M", "-g", "60", "-keyint_min", "60", "-sc_threshold", "0", "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-async", "1"]
+    elif profile == "cpu_fps60":
+        c += ["-vf", "fps=60000/1001", "-fps_mode", "cfr", "-c:v", "libx264", "-preset", "superfast", "-tune", "zerolatency", "-profile:v", "high", "-pix_fmt", "yuv420p", "-x264-params", "nal-hrd=cbr", "-b:v", "8M", "-maxrate", "8M", "-bufsize", "16M", "-g", "120", "-keyint_min", "120", "-sc_threshold", "0", "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-async", "1"]
+        
     else:
-        raise SystemExit("unknown profile: " + profile)
-    c += ["-mpegts_copyts", "0", "-avoid_negative_ts", "make_zero", "-muxdelay", "0", "-muxpreload", "0", "-max_muxing_queue_size", "4096", "-flush_packets", "1", "-mpegts_flags", "+pat_pmt_at_frames+resend_headers+initial_discontinuity", "-f", "mpegts", "pipe:1"]
+        raise SystemExit("unknown profile identifier: " + profile)
+    
+    # 2. Perfect MPEG-TS flags for Emby Ingestion
+    c += [
+        "-mpegts_copyts", "1", 
+        "-avoid_negative_ts", "disabled", 
+        "-muxdelay", "0", 
+        "-muxpreload", "0", 
+        "-max_muxing_queue_size", "4096", 
+        "-flush_packets", "1", 
+        "-mpegts_flags", "+pat_pmt_at_frames+resend_headers", 
+        "-f", "mpegts", 
+        "pipe:1"
+    ]
     return c
 
 
@@ -72,7 +102,7 @@ def cvlc_cmd():
 
 def main():
     if len(sys.argv) != 4:
-        print("usage: profilarr-supervisor.py <passthrough|uncapped|fps30|fps60> <userAgent> <streamUrl>", file=sys.stderr)
+        print("usage: profilarr-supervisor.py <profile_key> <userAgent> <streamUrl>", file=sys.stderr)
         return 2
     profile, ua, url = sys.argv[1:]
     set_pdeathsig()
@@ -105,3 +135,4 @@ def main():
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
