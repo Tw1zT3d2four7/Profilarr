@@ -30,10 +30,10 @@ SUPERVISOR = "profilarr-supervisor.py"
 
 class Plugin:
     name = "Profilarr"
-    version = "1.0.8"
+    version = "1.0.9"
     description = "Hybrid ffmpeg + cvlc stream profile with auto-overwriting selectable variants."
     author = "Tw1zT3d2four7"
-    help_url = "https://github.com"
+    help_url = "https://github.com/Tw1zT3d2four7/Profilarr"
     dst_dir = "/data/profilarr"
     plugin_dir = Path(__file__).resolve().parent
     plugin_key = plugin_dir.name.replace(" ", "_").lower()
@@ -140,10 +140,16 @@ class Plugin:
         # Explicitly append the corresponding filename to the target stream profile object name
         target_profile_name = f"{base_name} Profile ({filename})"
 
-        # DESTRUCTIVE OVERWRITE LOGIC: Purge any old iterations containing the prefix to ensure zero clutter
-        existing_profiles = StreamProfile.objects.filter(name__icontains=base_name)
+        # DESTRUCTIVE OVERWRITE LOGIC: Purge old variants generated under this exact
+        # prefix (matches the "<prefix> Profile (<script>.sh)" pattern used below) so
+        # an unrelated Stream Profile that merely contains the prefix text is never
+        # touched. Locked profiles are always skipped and reported, not silently left.
+        existing_profiles = StreamProfile.objects.filter(name__istartswith=f"{base_name} Profile (")
+        skipped_locked = []
         for old_prof in existing_profiles:
-            if not old_prof.locked:
+            if old_prof.locked:
+                skipped_locked.append(old_prof.name)
+            else:
                 old_prof.delete()
 
         # Build the chosen profile configuration
@@ -155,10 +161,15 @@ class Plugin:
         }
         
         new_profile = StreamProfile(name=target_profile_name, **defaults)
-        new_profile.save()
+        try:
+            new_profile.save()
+        except Exception as e:
+            return {"status": "error", "message": f"Could not create profile '{target_profile_name}': {type(e).__name__}: {e}"}
 
         msg = f"Successfully synchronized stream pipeline. Active variant: {label}."
-        
+        if skipped_locked:
+            msg += f" Note: {len(skipped_locked)} locked profile(s) with a matching name were left in place: {', '.join(skipped_locked)}."
+
         if self.settings.get("set_as_default", True):
             try:
                 from core.models import CoreSettings
@@ -182,10 +193,14 @@ class Plugin:
             for pid_file in run_dir.glob("*.pid"):
                 with contextlib.suppress(OSError, ValueError):
                     os.kill(int(pid_file.read_text().strip()), signal.SIGTERM)
+                # Always clean up the pid file itself -- whether the signal landed
+                # or the process was already gone (ProcessLookupError-equivalent
+                # ValueError/OSError above), a stale entry here should never persist.
+                with contextlib.suppress(OSError):
+                    pid_file.unlink()
 
     def run(self, action: str, params: dict, context: dict):
         self.settings = context.get("settings", {}) or {}
         if action == "generate_profile": return self._generate_profile()
         if action == "reinstall": return self._reinstall()
         return {"status": "error", "message": f"Unknown action: {action}"}
-

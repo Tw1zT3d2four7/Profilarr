@@ -83,8 +83,8 @@ def ffmpeg_cmd(profile, ua, url):
     
     # 2. Perfect MPEG-TS flags for Emby Ingestion
     c += [
-        "-mpegts_copyts", "1", 
-        "-avoid_negative_ts", "disabled", 
+        "-mpegts_copyts", "0", 
+        "-avoid_negative_ts", "make_zero", 
         "-muxdelay", "0", 
         "-muxpreload", "0", 
         "-max_muxing_queue_size", "4096", 
