@@ -1,4 +1,4 @@
-# Profilarr 2.0.4
+# Profilarr 2.0.7
 from __future__ import annotations
 
 import contextlib
@@ -17,10 +17,10 @@ SUPERVISOR = "profilarr-supervisor.py"
 
 PROFILES = {
     "default": {"filename": "profilarr.sh", "label": "Profilarr Default", "family": "default", "encoders": {"copy"}},
-    "nvidia": {"filename": "profilarr-nvidia.sh", "label": "[NVIDIA] NVENC", "family": "nvidia", "encoders": {"copy", "h264_nvenc", "hevc_nvenc", "av1_nvenc"}},
-    "amd": {"filename": "profilarr-amd.sh", "label": "[AMD] AMF", "family": "amd", "encoders": {"copy", "h264_amf", "hevc_amf", "av1_amf"}},
-    "intel": {"filename": "profilarr-intel.sh", "label": "[INTEL] QSV", "family": "intel", "encoders": {"copy", "h264_qsv", "hevc_qsv", "av1_qsv"}},
-    "cpu": {"filename": "profilarr-cpu.sh", "label": "[CPU] Software", "family": "cpu", "encoders": {"copy", "libx264", "libx265", "libsvtav1"}},
+    "nvidia": {"filename": "profilarr-nvidia.sh", "label": "[NVIDIA] NVENC", "family": "nvidia", "encoders": {"h264_nvenc", "hevc_nvenc", "av1_nvenc"}},
+    "amd": {"filename": "profilarr-amd.sh", "label": "[AMD] AMF", "family": "amd", "encoders": {"h264_amf", "hevc_amf", "av1_amf"}},
+    "intel": {"filename": "profilarr-intel.sh", "label": "[INTEL] QSV", "family": "intel", "encoders": {"h264_qsv", "hevc_qsv", "av1_qsv"}},
+    "cpu": {"filename": "profilarr-cpu.sh", "label": "[CPU] Software", "family": "cpu", "encoders": {"libx264", "libx265", "libsvtav1"}},
 }
 
 VIDEO_OPTIONS = {
@@ -30,12 +30,14 @@ VIDEO_OPTIONS = {
     "av1": ("AV1", "AV1 video encoding using the selected hardware family."),
 }
 
+# "copy" is intentionally omitted for nvidia/amd/intel/cpu: those profiles
+# exist to transcode, so Copy is only valid on the Profilarr Default profile.
 VIDEO_ENCODERS = {
     "default": {"copy": "copy"},
-    "nvidia": {"copy": "copy", "h264": "h264_nvenc", "hevc": "hevc_nvenc", "av1": "av1_nvenc"},
-    "amd": {"copy": "copy", "h264": "h264_amf", "hevc": "hevc_amf", "av1": "av1_amf"},
-    "intel": {"copy": "copy", "h264": "h264_qsv", "hevc": "hevc_qsv", "av1": "av1_qsv"},
-    "cpu": {"copy": "copy", "h264": "libx264", "hevc": "libx265", "av1": "libsvtav1"},
+    "nvidia": {"h264": "h264_nvenc", "hevc": "hevc_nvenc", "av1": "av1_nvenc"},
+    "amd": {"h264": "h264_amf", "hevc": "hevc_amf", "av1": "av1_amf"},
+    "intel": {"h264": "h264_qsv", "hevc": "hevc_qsv", "av1": "av1_qsv"},
+    "cpu": {"h264": "libx264", "hevc": "libx265", "av1": "libsvtav1"},
 }
 
 
@@ -43,6 +45,22 @@ AUDIO_OPTIONS = {
     "copy": "Default / Copy", "aac": "AAC", "ac3": "AC3", "eac3": "E-AC3", "opus": "Opus", "mp3": "MP3"
 }
 AUDIO_ENCODERS = {"aac": "aac", "ac3": "ac3", "eac3": "eac3", "opus": "libopus", "mp3": "libmp3lame"}
+
+FPS_OPTIONS = {"copy": "Default / Source Framerate", "30": "Force 30 FPS", "60": "Force 60 FPS"}
+# FPS forcing re-encodes the video, so it's only meaningful for the hardware
+# encoder families. "default" (always copy) and "cpu" are excluded here.
+FPS_ALLOWED = {
+    "default": {"copy"},
+    "nvidia": {"copy", "30", "60"},
+    "amd": {"copy", "30", "60"},
+    "intel": {"copy", "30", "60"},
+    "cpu": {"copy"},
+}
+
+CACHE_OPTIONS = {
+    "3000": "3000 ms", "6000": "6000 ms (Default)", "9000": "9000 ms",
+    "12000": "12000 ms", "15000": "15000 ms",
+}
 
 
 def _run(cmd, timeout=8):
@@ -94,8 +112,8 @@ def detect_capabilities():
 
 class Plugin:
     name = "Profilarr"
-    version = "2.0.4"
-    description = "Hardware-family video profiles with independent video and audio transcoding overrides."
+    version = "2.0.7"
+    description = "Hardware-family video profiles with independent video, audio, and frame rate transcoding overrides."
     author = "Tw1zT3d2four7"
     help_url = "https://github.com/Tw1zT3d2four7/Profilarr"
     dst_dir = "/data/profilarr"
@@ -118,8 +136,10 @@ class Plugin:
         return [
             {"id": "profile_name", "label": "Profile Name Prefix *", "type": "string", "default": "Profilarr", "description": "Base name used for the generated Dispatcharr Stream Profile."},
             {"id": "selected_profile", "label": "Hardware / Video Profile", "type": "select", "default": "default", "options": [{"value": k, "label": v["label"]} for k, v in PROFILES.items()], "description": "All five profiles are available. Profilarr validates hardware/FFmpeg support when applied."},
-            {"id": "video_override", "label": "Video Transcoding Override", "type": "select", "default": "copy", "options": [{"value": k, "label": v[0]} for k, v in VIDEO_OPTIONS.items()], "description": "Select the video codec. Profilarr automatically uses the encoder belonging to the selected hardware/video profile."},
-            {"id": "audio_override", "label": "Audio Transcoding Override", "type": "select", "default": "copy", "options": [{"value": k, "label": v} for k, v in AUDIO_OPTIONS.items()], "description": "Independent of video hardware."},
+            {"id": "video_override", "label": "Video Transcoding Override", "type": "select", "default": "copy", "options": [{"value": k, "label": v[0]} for k, v in VIDEO_OPTIONS.items()], "description": "Select the video codec. Copy is valid only on the Profilarr Default profile — NVIDIA, AMD, Intel, and CPU profiles require an actual codec."},
+            {"id": "audio_override", "label": "Audio Transcoding Override", "type": "select", "default": "copy", "options": [{"value": k, "label": v} for k, v in AUDIO_OPTIONS.items()], "description": "Copy is valid only on the Profilarr Default profile — NVIDIA, AMD, Intel, and CPU profiles require an actual audio codec."},
+            {"id": "fps_override", "label": "Frame Rate Override", "type": "select", "default": "copy", "options": [{"value": k, "label": v} for k, v in FPS_OPTIONS.items()], "description": "NVIDIA, AMD, and Intel profiles only. Requires a Video Transcoding Override other than Copy."},
+            {"id": "network_caching", "label": "CVLC Network Cache (ms)", "type": "select", "default": "6000", "options": [{"value": k, "label": v} for k, v in CACHE_OPTIONS.items()], "description": "Sets cvlc's --network-caching buffer. Higher smooths CDN gaps at the cost of added latency."},
             {"id": "set_as_default", "label": "Set as Systemwide Default Profile", "type": "boolean", "default": True, "description": "Automatically sets the generated profile as the Dispatcharr default."},
         ]
 
@@ -148,7 +168,7 @@ class Plugin:
     def _valid_name(name):
         return bool(name) and bool(re.match(r"^[\w .\-]{1,64}$", name))
 
-    def _validate(self, profile, video, audio):
+    def _validate(self, profile, video, audio, fps, cache):
         caps = detect_capabilities()
         if profile not in VIDEO_ENCODERS:
             return "Unknown hardware profile."
@@ -159,8 +179,18 @@ class Plugin:
             return f"FFmpeg encoder {encoder} is not available in this Dispatcharr container."
         if audio not in AUDIO_OPTIONS:
             return "Unknown audio override."
+        if audio == "copy" and profile != "default":
+            return f"Audio override copy is not available for the selected {PROFILES[profile]['label']} profile — choose an audio codec."
         if audio != "copy" and AUDIO_ENCODERS.get(audio) not in caps["encoders"]:
             return f"FFmpeg audio encoder {AUDIO_ENCODERS.get(audio)} is not available."
+        if fps not in FPS_OPTIONS:
+            return "Unknown frame rate override."
+        if fps != "copy" and fps not in FPS_ALLOWED.get(profile, {"copy"}):
+            return f"Frame rate override is only available for NVIDIA, AMD, and Intel profiles, not {PROFILES[profile]['label']}."
+        if fps != "copy" and video == "copy":
+            return "Frame rate override requires a Video Transcoding Override other than Copy."
+        if cache not in CACHE_OPTIONS:
+            return "Unknown network cache value."
         return None
 
     def _generate_profile(self):
@@ -168,9 +198,11 @@ class Plugin:
         profile = self.settings.get("selected_profile", "default")
         video = self.settings.get("video_override", "copy")
         audio = self.settings.get("audio_override", "copy")
+        fps = self.settings.get("fps_override", "copy")
+        cache = self.settings.get("network_caching", "6000")
         if not self._valid_name(base):
             return {"status": "error", "message": "Invalid profile prefix."}
-        error = self._validate(profile, video, audio)
+        error = self._validate(profile, video, audio, fps, cache)
         if error:
             return {"status": "error", "message": error}
         p = PROFILES[profile]
@@ -179,12 +211,13 @@ class Plugin:
         for old in StreamProfile.objects.filter(name__istartswith=f"{base} Profile ("):
             if not old.locked:
                 old.delete()
-        new = StreamProfile(name=target, command=str(Path(self.dst_dir) / p["filename"]), parameters=f"'{{userAgent}}' '{{streamUrl}}' '{resolved_video}' '{audio}'", is_active=True, locked=False)
+        new = StreamProfile(name=target, command=str(Path(self.dst_dir) / p["filename"]), parameters=f"'{{userAgent}}' '{{streamUrl}}' '{resolved_video}' '{audio}' '{fps}' '{cache}'", is_active=True, locked=False)
         try:
             new.save()
         except Exception as e:
             return {"status": "error", "message": f"Could not create profile: {type(e).__name__}: {e}"}
-        msg = f"Profilarr 2.0.4 synchronized: {p['label']} | Video: {VIDEO_OPTIONS[video][0]} ({resolved_video}) | Audio: {AUDIO_OPTIONS[audio]}"
+        fps_note = f" | FPS: {FPS_OPTIONS[fps]}" if fps != "copy" else ""
+        msg = f"Profilarr {self.version} synchronized: {p['label']} | Video: {VIDEO_OPTIONS[video][0]} ({resolved_video}) | Audio: {AUDIO_OPTIONS[audio]}{fps_note} | Cache: {cache} ms"
         if self.settings.get("set_as_default", True):
             try:
                 from core.models import CoreSettings
@@ -197,7 +230,7 @@ class Plugin:
         try:
             self._install()
             caps = detect_capabilities()
-            return {"status": "ok", "message": f"Profilarr 2.0.4 refreshed. Generated all five wrappers. FFmpeg encoders detected: {len(caps['encoders'])}; GPU families detected: {', '.join(sorted(caps['vendors'])) or 'none'}"}
+            return {"status": "ok", "message": f"Profilarr {self.version} refreshed. Generated all five wrappers. FFmpeg encoders detected: {len(caps['encoders'])}; GPU families detected: {', '.join(sorted(caps['vendors'])) or 'none'}"}
         except OSError as e:
             return {"status": "error", "message": str(e)}
 

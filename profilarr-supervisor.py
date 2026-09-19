@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Profilarr 2.0.4 process supervisor.
+"""Profilarr 2.0.7 process supervisor.
 
 The supervisor is the process launched by Dispatcharr. Linux PR_SET_PDEATHSIG
 makes the supervisor and its ffmpeg/cvlc children receive SIGKILL when the
@@ -46,10 +46,20 @@ AUDIO_ENCODERS = {
 
 ALLOWED = {
     "default": {"copy"},
-    "nvidia": {"copy", "h264_nvenc", "hevc_nvenc", "av1_nvenc"},
-    "amd": {"copy", "h264_amf", "hevc_amf", "av1_amf"},
-    "intel": {"copy", "h264_qsv", "hevc_qsv", "av1_qsv"},
-    "cpu": {"copy", "libx264", "libx265", "libsvtav1"},
+    "nvidia": {"h264_nvenc", "hevc_nvenc", "av1_nvenc"},
+    "amd": {"h264_amf", "hevc_amf", "av1_amf"},
+    "intel": {"h264_qsv", "hevc_qsv", "av1_qsv"},
+    "cpu": {"libx264", "libx265", "libsvtav1"},
+}
+
+# Forcing FPS re-encodes video, so it only applies to the hardware encoder
+# families. "default" (always copy) and "cpu" are excluded.
+FPS_ALLOWED = {
+    "default": {"copy"},
+    "nvidia": {"copy", "30", "60"},
+    "amd": {"copy", "30", "60"},
+    "intel": {"copy", "30", "60"},
+    "cpu": {"copy"},
 }
 
 
@@ -82,9 +92,11 @@ def terminate(proc):
             pass
 
 
-def video_args(v):
+def video_args(v, fps="copy"):
     enc, family = VIDEO_ENGINES[v]
     if enc == "copy":
+        if fps != "copy":
+            raise ValueError("fps override requires a video encoder, not copy")
         return ["-c:v", "copy"]
     args = ["-c:v", enc]
     if family == "nvenc":
@@ -94,7 +106,13 @@ def video_args(v):
     elif family == "qsv":
         args += ["-preset", "veryfast", "-b:v", "8M", "-maxrate", "8M", "-bufsize", "16M"]
     elif family == "cpu":
+        if fps != "copy":
+            raise ValueError("fps override is only available for NVIDIA, AMD, and Intel profiles")
         args += ["-preset", "superfast", "-tune", "zerolatency", "-b:v", "8M", "-maxrate", "8M", "-bufsize", "16M"]
+    if fps != "copy" and family in ("nvenc", "amf", "qsv"):
+        rate = "30000/1001" if fps == "30" else "60000/1001"
+        gop = "60" if fps == "30" else "120"
+        args += ["-vf", f"fps={rate}", "-fps_mode", "cfr", "-g", gop, "-keyint_min", gop]
     if enc.startswith("h264_") or enc == "libx264":
         args += ["-profile:v", "high", "-pix_fmt", "yuv420p"]
     elif enc.startswith("hevc_") or enc == "libx265":
@@ -110,13 +128,19 @@ def audio_args(a):
     return out
 
 
-def ffmpeg_cmd(profile, ua, url, video, audio):
+def ffmpeg_cmd(profile, ua, url, video, audio, fps="copy"):
     if profile not in ALLOWED:
         raise ValueError("unknown profile identifier: " + profile)
     if video not in ALLOWED[profile]:
         raise ValueError(f"video override '{video}' is invalid for profile '{profile}'")
     if audio not in AUDIO_ENCODERS:
         raise ValueError("unknown audio override: " + audio)
+    if audio == "copy" and profile != "default":
+        raise ValueError(f"audio override 'copy' is invalid for profile '{profile}'")
+    if fps not in FPS_ALLOWED.get(profile, {"copy"}):
+        raise ValueError(f"fps override '{fps}' is invalid for profile '{profile}'")
+    if fps != "copy" and video == "copy":
+        raise ValueError("fps override requires a video codec override, not copy")
 
     c = [
         "ffmpeg", "-hide_banner", "-user_agent", ua,
@@ -126,7 +150,7 @@ def ffmpeg_cmd(profile, ua, url, video, audio):
         "-probesize", "10M", "-analyzeduration", "5M", "-i", url,
         "-map", "0:v:0?", "-map", "0:a:0?", "-sn", "-dn",
     ]
-    c += video_args(video)
+    c += video_args(video, fps)
     c += audio_args(audio)
     c += [
         "-mpegts_copyts", "0", "-avoid_negative_ts", "make_zero",
@@ -138,22 +162,27 @@ def ffmpeg_cmd(profile, ua, url, video, audio):
     return c
 
 
-def cvlc_cmd():
+CACHE_ALLOWED = {"3000", "6000", "9000", "12000", "15000"}
+
+
+def cvlc_cmd(cache="6000"):
+    if cache not in CACHE_ALLOWED:
+        raise ValueError("unknown network cache value: " + cache)
     return [
         "cvlc", "-I", "dummy", "--no-lua", "--no-auto-preparse", "--no-dbus",
         "--no-interact", "--no-stats", "--aout", "adummy", "--vout", "vdummy",
-        "--no-sout-all", "--sout-keep", "--network-caching", "6000",
+        "--no-sout-all", "--sout-keep", "--network-caching", cache,
         "--sout-mux-caching", "1500", "--adaptive-logic=highest",
         "--sout=#std{access=file,mux=ts,dst=-}", "fd://0",
     ]
 
 
 def main():
-    if len(sys.argv) != 6:
-        print("usage: profilarr-supervisor.py <profile_key> <userAgent> <streamUrl> <videoOverride> <audioOverride>", file=sys.stderr)
+    if len(sys.argv) != 8:
+        print("usage: profilarr-supervisor.py <profile_key> <userAgent> <streamUrl> <videoOverride> <audioOverride> <fpsOverride> <networkCaching>", file=sys.stderr)
         return 2
 
-    profile, ua, url, video, audio = sys.argv[1:]
+    profile, ua, url, video, audio, fps, cache = sys.argv[1:]
     try:
         set_pdeathsig()
         run_dir = Path("/data/profilarr/run")
@@ -175,7 +204,7 @@ def main():
         signal.signal(signal.SIGINT, shutdown)
         try:
             ffmpeg = subprocess.Popen(
-                ffmpeg_cmd(profile, ua, url, video, audio),
+                ffmpeg_cmd(profile, ua, url, video, audio, fps),
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=None,
@@ -184,7 +213,7 @@ def main():
                 close_fds=True,
             )
             cvlc = subprocess.Popen(
-                cvlc_cmd(),
+                cvlc_cmd(cache),
                 stdin=ffmpeg.stdout,
                 stdout=sys.stdout,
                 stderr=None,

@@ -1,7 +1,7 @@
 {
   "name": "Profilarr",
-  "version": "2.0.4",
-  "description": "Hardware-family video profiles with codec-only video overrides and independent audio transcoding overrides.",
+  "version": "2.0.7",
+  "description": "Hardware-family video profiles with codec-only video overrides, independent audio transcoding overrides, and forced 30/60 FPS for NVIDIA, AMD, and Intel.",
   "author": "Tw1zT3d2four7",
   "help_url": "https://github.com/Tw1zT3d2four7/Profilarr",
   "fields": [
@@ -64,7 +64,7 @@
           "label": "AV1"
         }
       ],
-      "description": "Select the video codec. Profilarr automatically maps it to the encoder for the selected hardware/video profile."
+      "description": "Select the video codec. Copy is valid only on the Profilarr Default profile — NVIDIA, AMD, Intel, and CPU profiles require an actual codec."
     },
     {
       "id": "audio_override",
@@ -97,7 +97,57 @@
           "label": "MP3"
         }
       ],
-      "description": "Independent of the selected video hardware profile."
+      "description": "Copy is valid only on the Profilarr Default profile — NVIDIA, AMD, Intel, and CPU profiles require an actual audio codec."
+    },
+    {
+      "id": "fps_override",
+      "label": "Frame Rate Override",
+      "type": "select",
+      "default": "copy",
+      "options": [
+        {
+          "value": "copy",
+          "label": "Default / Source Framerate"
+        },
+        {
+          "value": "30",
+          "label": "Force 30 FPS"
+        },
+        {
+          "value": "60",
+          "label": "Force 60 FPS"
+        }
+      ],
+      "description": "NVIDIA, AMD, and Intel profiles only. Requires a Video Transcoding Override other than Copy."
+    },
+    {
+      "id": "network_caching",
+      "label": "CVLC Network Cache (ms)",
+      "type": "select",
+      "default": "6000",
+      "options": [
+        {
+          "value": "3000",
+          "label": "3000 ms"
+        },
+        {
+          "value": "6000",
+          "label": "6000 ms (Default)"
+        },
+        {
+          "value": "9000",
+          "label": "9000 ms"
+        },
+        {
+          "value": "12000",
+          "label": "12000 ms"
+        },
+        {
+          "value": "15000",
+          "label": "15000 ms"
+        }
+      ],
+      "description": "Sets cvlc's --network-caching buffer. Higher smooths CDN gaps at the cost of added latency."
     },
     {
       "id": "set_as_default",
