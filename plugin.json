@@ -1,0 +1,126 @@
+{
+  "name": "Profilarr",
+  "version": "2.0.4",
+  "description": "Hardware-family video profiles with codec-only video overrides and independent audio transcoding overrides.",
+  "author": "Tw1zT3d2four7",
+  "help_url": "https://github.com/Tw1zT3d2four7/Profilarr",
+  "fields": [
+    {
+      "id": "profile_name",
+      "label": "Profile Name Prefix *",
+      "type": "string",
+      "default": "Profilarr",
+      "description": "Base name used for the generated Dispatcharr Stream Profile."
+    },
+    {
+      "id": "selected_profile",
+      "label": "Hardware / Video Profile",
+      "type": "select",
+      "default": "default",
+      "options": [
+        {
+          "value": "default",
+          "label": "Profilarr Default"
+        },
+        {
+          "value": "nvidia",
+          "label": "[NVIDIA] NVENC"
+        },
+        {
+          "value": "amd",
+          "label": "[AMD] AMF"
+        },
+        {
+          "value": "intel",
+          "label": "[INTEL] QSV"
+        },
+        {
+          "value": "cpu",
+          "label": "[CPU] Software"
+        }
+      ],
+      "description": "Select the video encoder family. Profilarr validates that the selected encoder is usable when the profile is applied."
+    },
+    {
+      "id": "video_override",
+      "label": "Video Transcoding Override",
+      "type": "select",
+      "default": "copy",
+      "options": [
+        {
+          "value": "copy",
+          "label": "Default / Copy"
+        },
+        {
+          "value": "h264",
+          "label": "H.264"
+        },
+        {
+          "value": "hevc",
+          "label": "HEVC"
+        },
+        {
+          "value": "av1",
+          "label": "AV1"
+        }
+      ],
+      "description": "Select the video codec. Profilarr automatically maps it to the encoder for the selected hardware/video profile."
+    },
+    {
+      "id": "audio_override",
+      "label": "Audio Transcoding Override",
+      "type": "select",
+      "default": "copy",
+      "options": [
+        {
+          "value": "copy",
+          "label": "Default / Copy"
+        },
+        {
+          "value": "aac",
+          "label": "AAC"
+        },
+        {
+          "value": "ac3",
+          "label": "AC3"
+        },
+        {
+          "value": "eac3",
+          "label": "E-AC3"
+        },
+        {
+          "value": "opus",
+          "label": "Opus"
+        },
+        {
+          "value": "mp3",
+          "label": "MP3"
+        }
+      ],
+      "description": "Independent of the selected video hardware profile."
+    },
+    {
+      "id": "set_as_default",
+      "label": "Set as Systemwide Default Profile",
+      "type": "boolean",
+      "default": true,
+      "description": "Automatically sets the generated profile as the Dispatcharr default."
+    }
+  ],
+  "actions": [
+    {
+      "id": "generate_profile",
+      "label": "Generate and Overwrite Profile",
+      "button_label": "Apply & Synchronize Stream Profile",
+      "button_color": "green",
+      "description": "Validate the selected hardware-specific encoder, resolve the video codec, generate the wrapper, and create the active Stream Profile."
+    },
+    {
+      "id": "reinstall",
+      "label": "Refresh Profilarr",
+      "button_label": "Refresh Scripts & Detection",
+      "button_color": "blue",
+      "description": "Regenerate all five wrapper scripts and refresh FFmpeg/hardware detection."
+    }
+  ]
+}
