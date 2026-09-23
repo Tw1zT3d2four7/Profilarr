@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="logo.png" alt="Profilarr logo" width="150">
+</p>
+
 # Profilarr
 
 **Hardware-aware FFmpeg + CVLC stream profiles for Dispatcharr.**
@@ -342,4 +346,3 @@ for p in OutputProfile.objects.filter(name__istartswith="Profilarr Output -"):
 ## License
 
 See `LICENSE`.
-
