@@ -337,7 +337,7 @@ for p in OutputProfile.objects.filter(name__istartswith="Profilarr Output -"):
 
 ## Version
 
-**2.1.4**
+**2.1.5**
 
 ## Author
 
