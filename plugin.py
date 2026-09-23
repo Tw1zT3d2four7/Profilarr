@@ -1,122 +1,71 @@
-# Profilarr 2.0.7
+# Profilarr plugin
 from __future__ import annotations
-
-import contextlib
-import os
-import re
-import shutil
-import signal
-import stat
-import subprocess
+import contextlib, os, re, shutil, signal, stat, subprocess
 from pathlib import Path
-
 from apps.plugins.models import PluginConfig
-from core.models import StreamProfile
+from core.models import StreamProfile, OutputProfile, CoreSettings
+from apps.accounts.models import User
 
 SUPERVISOR = "profilarr-supervisor.py"
 
 PROFILES = {
-    "default": {"filename": "profilarr.sh", "label": "Profilarr Default", "family": "default", "encoders": {"copy"}},
-    "nvidia": {"filename": "profilarr-nvidia.sh", "label": "[NVIDIA] NVENC", "family": "nvidia", "encoders": {"h264_nvenc", "hevc_nvenc", "av1_nvenc"}},
-    "amd": {"filename": "profilarr-amd.sh", "label": "[AMD] AMF", "family": "amd", "encoders": {"h264_amf", "hevc_amf", "av1_amf"}},
-    "intel": {"filename": "profilarr-intel.sh", "label": "[INTEL] QSV", "family": "intel", "encoders": {"h264_qsv", "hevc_qsv", "av1_qsv"}},
-    "cpu": {"filename": "profilarr-cpu.sh", "label": "[CPU] Software", "family": "cpu", "encoders": {"libx264", "libx265", "libsvtav1"}},
+    "default": {
+        "filename": "profilarr.sh",
+        "label": "Profilarr Default",
+        "family": "default",
+        "encoders": {"copy"},
+    },
+    "nvidia": {
+        "filename": "profilarr-nvidia.sh",
+        "label": "[NVIDIA] NVENC",
+        "family": "nvidia",
+        "encoders": {"h264_nvenc", "hevc_nvenc", "av1_nvenc"},
+    },
+    "amd": {
+        "filename": "profilarr-amd.sh",
+        "label": "[AMD] AMF",
+        "family": "amd",
+        "encoders": {"h264_amf", "hevc_amf", "av1_amf"},
+    },
+    "intel": {
+        "filename": "profilarr-intel.sh",
+        "label": "[INTEL] QSV",
+        "family": "intel",
+        "encoders": {"h264_qsv", "hevc_qsv", "av1_qsv"},
+    },
+    "cpu": {
+        "filename": "profilarr-cpu.sh",
+        "label": "[CPU] Software",
+        "family": "cpu",
+        "encoders": {"libx264", "libx265", "libsvtav1"},
+    },
 }
-
-VIDEO_OPTIONS = {
-    "copy": ("Default / Copy", "Copy source video without re-encoding."),
-    "h264": ("H.264", "H.264 video encoding using the selected hardware family."),
-    "hevc": ("HEVC", "HEVC video encoding using the selected hardware family."),
-    "av1": ("AV1", "AV1 video encoding using the selected hardware family."),
-}
-
-# "copy" is intentionally omitted for nvidia/amd/intel/cpu: those profiles
-# exist to transcode, so Copy is only valid on the Profilarr Default profile.
-VIDEO_ENCODERS = {
-    "default": {"copy": "copy"},
-    "nvidia": {"h264": "h264_nvenc", "hevc": "hevc_nvenc", "av1": "av1_nvenc"},
-    "amd": {"h264": "h264_amf", "hevc": "hevc_amf", "av1": "av1_amf"},
-    "intel": {"h264": "h264_qsv", "hevc": "hevc_qsv", "av1": "av1_qsv"},
-    "cpu": {"h264": "libx264", "hevc": "libx265", "av1": "libsvtav1"},
-}
-
 
 AUDIO_OPTIONS = {
-    "copy": "Default / Copy", "aac": "AAC", "ac3": "AC3", "eac3": "E-AC3", "opus": "Opus", "mp3": "MP3"
-}
-AUDIO_ENCODERS = {"aac": "aac", "ac3": "ac3", "eac3": "eac3", "opus": "libopus", "mp3": "libmp3lame"}
-
-FPS_OPTIONS = {"copy": "Default / Source Framerate", "30": "Force 30 FPS", "60": "Force 60 FPS"}
-# FPS forcing re-encodes the video, so it's only meaningful for the hardware
-# encoder families. "default" (always copy) and "cpu" are excluded here.
-FPS_ALLOWED = {
-    "default": {"copy"},
-    "nvidia": {"copy", "30", "60"},
-    "amd": {"copy", "30", "60"},
-    "intel": {"copy", "30", "60"},
-    "cpu": {"copy"},
+    "copy": "Copy",
+    "aac": "AAC",
+    "ac3": "AC3",
+    "eac3": "E-AC3",
+    "opus": "Opus",
+    "mp3": "MP3",
 }
 
 CACHE_OPTIONS = {
-    "3000": "3000 ms", "6000": "6000 ms (Default)", "9000": "9000 ms",
-    "12000": "12000 ms", "15000": "15000 ms",
+    "3000": "3000 ms",
+    "6000": "6000 ms (Default)",
+    "9000": "9000 ms",
+    "12000": "12000 ms",
+    "15000": "15000 ms",
 }
-
-
-def _run(cmd, timeout=8):
-    try:
-        return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=timeout, check=False)
-    except (OSError, subprocess.SubprocessError):
-        return None
-
-
-def _ffmpeg_encoders():
-    r = _run(["ffmpeg", "-hide_banner", "-encoders"], 10)
-    if not r or r.returncode != 0:
-        return set()
-    result = set()
-    for line in r.stdout.splitlines():
-        m = re.match(r"^\s*[A-Z.]{6}\s+(\S+)", line)
-        if m:
-            result.add(m.group(1))
-    return result
-
-
-def _gpu_vendors():
-    vendors = set()
-    for card in Path("/sys/class/drm").glob("card[0-9]*"):
-        try:
-            v = (card / "device/vendor").read_text().strip().lower()
-        except OSError:
-            continue
-        vendors.update({"nvidia"} if v == "0x10de" else {"amd"} if v == "0x1002" else {"intel"} if v == "0x8086" else set())
-    if "nvidia" not in vendors:
-        r = _run(["nvidia-smi", "-L"], 5)
-        if r and r.returncode == 0:
-            vendors.add("nvidia")
-    return vendors
-
-
-def detect_capabilities():
-    enc = _ffmpeg_encoders()
-    vendors = _gpu_vendors()
-    available = {"default", "cpu"}
-    if "nvidia" in vendors and enc & {"h264_nvenc", "hevc_nvenc", "av1_nvenc"}:
-        available.add("nvidia")
-    if "amd" in vendors and enc & {"h264_amf", "hevc_amf", "av1_amf"}:
-        available.add("amd")
-    if "intel" in vendors and enc & {"h264_qsv", "hevc_qsv", "av1_qsv"}:
-        available.add("intel")
-    return {"encoders": enc, "vendors": vendors, "families": available}
 
 
 class Plugin:
     name = "Profilarr"
-    version = "2.0.7"
-    description = "Hardware-family video profiles with independent video, audio, and frame rate transcoding overrides."
+    version = "2.1.4"
+    description = "Hardware-aware FFmpeg + CVLC stream profiles for Dispatcharr."
     author = "Tw1zT3d2four7"
     help_url = "https://github.com/Tw1zT3d2four7/Profilarr"
-    dst_dir = "/data/profilarr"
+    dst_dir = "/data/plugins/profilarr"
     plugin_dir = Path(__file__).resolve().parent
     plugin_key = plugin_dir.name.replace(" ", "_").lower()
 
@@ -127,26 +76,114 @@ class Plugin:
         except PluginConfig.DoesNotExist:
             self.context = None
             self.settings = {}
+
         self._install()
-        self.capabilities = detect_capabilities()
         self.fields = self._fields()
         self.actions = self._actions()
 
     def _fields(self):
         return [
-            {"id": "profile_name", "label": "Profile Name Prefix *", "type": "string", "default": "Profilarr", "description": "Base name used for the generated Dispatcharr Stream Profile."},
-            {"id": "selected_profile", "label": "Hardware / Video Profile", "type": "select", "default": "default", "options": [{"value": k, "label": v["label"]} for k, v in PROFILES.items()], "description": "All five profiles are available. Profilarr validates hardware/FFmpeg support when applied."},
-            {"id": "video_override", "label": "Video Transcoding Override", "type": "select", "default": "copy", "options": [{"value": k, "label": v[0]} for k, v in VIDEO_OPTIONS.items()], "description": "Select the video codec. Copy is valid only on the Profilarr Default profile — NVIDIA, AMD, Intel, and CPU profiles require an actual codec."},
-            {"id": "audio_override", "label": "Audio Transcoding Override", "type": "select", "default": "copy", "options": [{"value": k, "label": v} for k, v in AUDIO_OPTIONS.items()], "description": "Copy is valid only on the Profilarr Default profile — NVIDIA, AMD, Intel, and CPU profiles require an actual audio codec."},
-            {"id": "fps_override", "label": "Frame Rate Override", "type": "select", "default": "copy", "options": [{"value": k, "label": v} for k, v in FPS_OPTIONS.items()], "description": "NVIDIA, AMD, and Intel profiles only. Requires a Video Transcoding Override other than Copy."},
-            {"id": "network_caching", "label": "CVLC Network Cache (ms)", "type": "select", "default": "6000", "options": [{"value": k, "label": v} for k, v in CACHE_OPTIONS.items()], "description": "Sets cvlc's --network-caching buffer. Higher smooths CDN gaps at the cost of added latency."},
-            {"id": "set_as_default", "label": "Set as Systemwide Default Profile", "type": "boolean", "default": True, "description": "Automatically sets the generated profile as the Dispatcharr default."},
+            {
+                "id": "video_profile",
+                "label": "Hardware / Video Profile",
+                "type": "select",
+                "default": "passthrough",
+                "options": [
+                    {
+                        "value": "passthrough",
+                        "label": "Passthrough (base video copy)",
+                    },
+                    {
+                        "value": "nvidia_source",
+                        "label": "[NVIDIA] NVENC (Source FPS)",
+                    },
+                    {
+                        "value": "nvidia_30",
+                        "label": "[NVIDIA] NVENC (Force 30 FPS)",
+                    },
+                    {
+                        "value": "nvidia_60",
+                        "label": "[NVIDIA] NVENC (Force 60 FPS)",
+                    },
+                    {
+                        "value": "intel_source",
+                        "label": "[INTEL] QSV (Source FPS)",
+                    },
+                    {
+                        "value": "intel_30",
+                        "label": "[INTEL] QSV (Force 30 FPS)",
+                    },
+                    {
+                        "value": "intel_60",
+                        "label": "[INTEL] QSV (Force 60 FPS)",
+                    },
+                    {
+                        "value": "amd_source",
+                        "label": "[AMD] AMF (Source FPS)",
+                    },
+                    {
+                        "value": "amd_30",
+                        "label": "[AMD] AMF (Force 30 FPS)",
+                    },
+                    {
+                        "value": "amd_60",
+                        "label": "[AMD] AMF (Force 60 FPS)",
+                    },
+                    {
+                        "value": "cpu_source",
+                        "label": "[CPU] Software (Source FPS)",
+                    },
+                    {
+                        "value": "cpu_30",
+                        "label": "[CPU] Software (Force 30 FPS)",
+                    },
+                    {
+                        "value": "cpu_60",
+                        "label": "[CPU] Software (Force 60 FPS)",
+                    },
+                ],
+            },
+            {
+                "id": "audio_override",
+                "label": "Audio Transcoding Override",
+                "type": "select",
+                "default": "aac",
+                "options": [
+                    {"value": "aac", "label": "AAC"},
+                    {"value": "ac3", "label": "AC3"},
+                    {"value": "eac3", "label": "E-AC3"},
+                    {"value": "opus", "label": "Opus"},
+                    {"value": "mp3", "label": "MP3"},
+                    {"value": "copy", "label": "Copy"},
+                ],
+            },
+            {
+                "id": "network_caching",
+                "label": "CVLC Network Cache (ms)",
+                "type": "select",
+                "default": "6000",
+                "options": [
+                    {"value": "3000", "label": "3000"},
+                    {"value": "6000", "label": "6000 (Default)"},
+                    {"value": "9000", "label": "9000"},
+                    {"value": "12000", "label": "12000"},
+                    {"value": "15000", "label": "15000"},
+                ],
+            },
         ]
 
     def _actions(self):
         return [
-            {"id": "generate_profile", "label": "Generate and Overwrite Profile", "button_label": "Apply & Synchronize Stream Profile", "button_color": "green", "description": "Validate selections and create the active Stream Profile."},
-            {"id": "reinstall", "label": "Refresh Profilarr", "button_label": "Refresh Scripts & Detection", "button_color": "blue", "description": "Regenerate all five wrapper scripts and refresh FFmpeg/hardware detection."},
+            {
+                "id": "generate_profile",
+                "label": "Apply & Synchronize",
+                "button_label": "Apply & Synchronize",
+                "button_color": "green",
+                "description": (
+                    "Create or update the selected Profilarr Stream Profile "
+                    "and matching Output Profile."
+                ),
+            }
         ]
 
     def _all_files(self):
@@ -154,98 +191,368 @@ class Plugin:
 
     def _install(self):
         os.makedirs(self.dst_dir, exist_ok=True)
+
         src = self.plugin_dir / SUPERVISOR
         dst = Path(self.dst_dir) / SUPERVISOR
-        shutil.copy2(src, dst)
+
+        if src.resolve() != dst.resolve():
+            shutil.copy2(src, dst)
+
         os.chmod(dst, 0o700)
+
         for key, p in PROFILES.items():
             wrapper = Path(self.dst_dir) / p["filename"]
-            wrapper.write_text(f'#!/bin/sh\nSCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexec python3 "$SCRIPT_DIR/{SUPERVISOR}" "{key}" "$@"\n')
+            wrapper.write_text(
+                f'#!/bin/sh\n'
+                f'SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\n'
+                f'exec python3 "$SCRIPT_DIR/{SUPERVISOR}" "{key}" "$@"\n'
+            )
             os.chmod(wrapper, 0o700)
-        (Path(self.dst_dir) / ".installed_version").write_text(self.version + "\n")
 
-    @staticmethod
-    def _valid_name(name):
-        return bool(name) and bool(re.match(r"^[\w .\-]{1,64}$", name))
+        (Path(self.dst_dir) / ".installed_version").write_text(
+            self.version + "\n"
+        )
 
-    def _validate(self, profile, video, audio, fps, cache):
-        caps = detect_capabilities()
-        if profile not in VIDEO_ENCODERS:
-            return "Unknown hardware profile."
-        if video not in VIDEO_ENCODERS[profile]:
-            return f"Video override {video} is not available for the selected {PROFILES[profile]['label']} profile."
-        encoder = VIDEO_ENCODERS[profile][video]
-        if encoder != "copy" and encoder not in caps["encoders"]:
-            return f"FFmpeg encoder {encoder} is not available in this Dispatcharr container."
-        if audio not in AUDIO_OPTIONS:
-            return "Unknown audio override."
-        if audio == "copy" and profile != "default":
-            return f"Audio override copy is not available for the selected {PROFILES[profile]['label']} profile — choose an audio codec."
-        if audio != "copy" and AUDIO_ENCODERS.get(audio) not in caps["encoders"]:
-            return f"FFmpeg audio encoder {AUDIO_ENCODERS.get(audio)} is not available."
-        if fps not in FPS_OPTIONS:
-            return "Unknown frame rate override."
-        if fps != "copy" and fps not in FPS_ALLOWED.get(profile, {"copy"}):
-            return f"Frame rate override is only available for NVIDIA, AMD, and Intel profiles, not {PROFILES[profile]['label']}."
-        if fps != "copy" and video == "copy":
-            return "Frame rate override requires a Video Transcoding Override other than Copy."
-        if cache not in CACHE_OPTIONS:
-            return "Unknown network cache value."
-        return None
+    def _selection(self):
+        return {
+            "passthrough": (
+                "default",
+                "copy",
+                "copy",
+                "Passthrough (base video copy)",
+            ),
+
+            "nvidia_source": (
+                "nvidia",
+                "h264_nvenc",
+                "copy",
+                "[NVIDIA] NVENC (Source FPS)",
+            ),
+            "nvidia_30": (
+                "nvidia",
+                "h264_nvenc",
+                "30",
+                "[NVIDIA] NVENC (Force 30 FPS)",
+            ),
+            "nvidia_60": (
+                "nvidia",
+                "h264_nvenc",
+                "60",
+                "[NVIDIA] NVENC (Force 60 FPS)",
+            ),
+
+            "intel_source": (
+                "intel",
+                "h264_qsv",
+                "copy",
+                "[INTEL] QSV (Source FPS)",
+            ),
+            "intel_30": (
+                "intel",
+                "h264_qsv",
+                "30",
+                "[INTEL] QSV (Force 30 FPS)",
+            ),
+            "intel_60": (
+                "intel",
+                "h264_qsv",
+                "60",
+                "[INTEL] QSV (Force 60 FPS)",
+            ),
+
+            "amd_source": (
+                "amd",
+                "h264_amf",
+                "copy",
+                "[AMD] AMF (Source FPS)",
+            ),
+            "amd_30": (
+                "amd",
+                "h264_amf",
+                "30",
+                "[AMD] AMF (Force 30 FPS)",
+            ),
+            "amd_60": (
+                "amd",
+                "h264_amf",
+                "60",
+                "[AMD] AMF (Force 60 FPS)",
+            ),
+
+            "cpu_source": (
+                "cpu",
+                "libx264",
+                "copy",
+                "[CPU] Software (Source FPS)",
+            ),
+            "cpu_30": (
+                "cpu",
+                "libx264",
+                "30",
+                "[CPU] Software (Force 30 FPS)",
+            ),
+            "cpu_60": (
+                "cpu",
+                "libx264",
+                "60",
+                "[CPU] Software (Force 60 FPS)",
+            ),
+        }
+
+    def _output_parameters(self, audio):
+        audio_args = {
+            "copy": "-c:a copy",
+            "aac": "-c:a aac -b:a 192k -ac 2",
+            "ac3": "-c:a ac3 -b:a 192k -ac 2",
+            "eac3": "-c:a eac3 -b:a 192k -ac 2",
+            "opus": "-c:a libopus -b:a 128k -ac 2",
+            "mp3": "-c:a libmp3lame -b:a 192k -ac 2",
+        }
+
+        if audio not in audio_args:
+            raise ValueError("unknown audio override: " + audio)
+
+        return (
+            "-fflags +discardcorrupt+genpts+nobuffer "
+            "-probesize 512K "
+            "-analyzeduration 0 "
+            "-i pipe:0 "
+            "-map 0 "
+            "-c:v copy "
+            f"{audio_args[audio]} "
+            "-max_muxing_queue_size 4096 "
+            "-flush_packets 1 "
+            "-mpegts_flags +pat_pmt_at_frames+resend_headers+initial_discontinuity "
+            "-f mpegts "
+            "pipe:1"
+        )
 
     def _generate_profile(self):
-        base = (self.settings.get("profile_name") or "Profilarr").strip()
-        profile = self.settings.get("selected_profile", "default")
-        video = self.settings.get("video_override", "copy")
-        audio = self.settings.get("audio_override", "copy")
-        fps = self.settings.get("fps_override", "copy")
-        cache = self.settings.get("network_caching", "6000")
-        if not self._valid_name(base):
-            return {"status": "error", "message": "Invalid profile prefix."}
-        error = self._validate(profile, video, audio, fps, cache)
-        if error:
-            return {"status": "error", "message": error}
-        p = PROFILES[profile]
-        resolved_video = VIDEO_ENCODERS[profile][video]
-        target = f"{base} Profile ({p['filename']})"
-        for old in StreamProfile.objects.filter(name__istartswith=f"{base} Profile ("):
-            if not old.locked:
-                old.delete()
-        new = StreamProfile(name=target, command=str(Path(self.dst_dir) / p["filename"]), parameters=f"'{{userAgent}}' '{{streamUrl}}' '{resolved_video}' '{audio}' '{fps}' '{cache}'", is_active=True, locked=False)
-        try:
-            new.save()
-        except Exception as e:
-            return {"status": "error", "message": f"Could not create profile: {type(e).__name__}: {e}"}
-        fps_note = f" | FPS: {FPS_OPTIONS[fps]}" if fps != "copy" else ""
-        msg = f"Profilarr {self.version} synchronized: {p['label']} | Video: {VIDEO_OPTIONS[video][0]} ({resolved_video}) | Audio: {AUDIO_OPTIONS[audio]}{fps_note} | Cache: {cache} ms"
-        if self.settings.get("set_as_default", True):
-            try:
-                from core.models import CoreSettings
-                CoreSettings._update_group("stream_settings", "Stream Settings", {"default_stream_profile": new.id})
-            except Exception as e:
-                msg += f" (global default not changed: {type(e).__name__}: {e})"
-        return {"status": "ok", "message": msg}
+        video_key = self.settings.get(
+            "video_profile",
+            "passthrough",
+        )
+        audio = self.settings.get(
+            "audio_override",
+            "aac",
+        )
+        cache = self.settings.get(
+            "network_caching",
+            "6000",
+        )
+        selections = self._selection()
 
-    def _reinstall(self):
+        if video_key not in selections:
+            return {
+                "status": "error",
+                "message": "Unknown video profile selection.",
+            }
+
+        if audio not in AUDIO_OPTIONS:
+            return {
+                "status": "error",
+                "message": "Unknown audio override.",
+            }
+
+        if cache not in CACHE_OPTIONS:
+            return {
+                "status": "error",
+                "message": "Unknown network cache value.",
+            }
+
+        profile, video, fps, video_label = selections[video_key]
+
+        audio_label = (
+            "AAC"
+            if audio == "aac"
+            else (
+                "Copy"
+                if audio == "copy"
+                else AUDIO_OPTIONS[audio]
+            )
+        )
+
+        stream_target = (
+            f"Profilarr Profile - {video_label} + Audio: {audio_label}"
+        )
+
+        output_target = (
+            f"Profilarr Output - {video_label} + Audio: {audio_label}"
+        )
+
+        p = PROFILES[profile]
+
+        stream_parameters = (
+            f"'{{userAgent}}' '{{streamUrl}}' "
+            f"'{video}' '{audio}' '{fps}' '{cache}'"
+        )
+
+        output_parameters = self._output_parameters(audio)
+
+        # ---------------------------------------------------------------------
+        # STREAM PROFILE CLEANUP
+        # ---------------------------------------------------------------------
+        for old in StreamProfile.objects.filter(
+            name__istartswith="Profilarr Profile -"
+        ):
+            if not old.locked and old.name != stream_target:
+                old.delete()
+
+        # ---------------------------------------------------------------------
+        # OUTPUT PROFILE CLEANUP
+        # ---------------------------------------------------------------------
+        for old in OutputProfile.objects.filter(
+            name__istartswith="Profilarr Output -"
+        ):
+            if not old.locked and old.name != output_target:
+                old.delete()
+
+        # ---------------------------------------------------------------------
+        # STREAM PROFILE CREATE / UPDATE
+        # ---------------------------------------------------------------------
         try:
-            self._install()
-            caps = detect_capabilities()
-            return {"status": "ok", "message": f"Profilarr {self.version} refreshed. Generated all five wrappers. FFmpeg encoders detected: {len(caps['encoders'])}; GPU families detected: {', '.join(sorted(caps['vendors'])) or 'none'}"}
-        except OSError as e:
-            return {"status": "error", "message": str(e)}
+            existing_stream = StreamProfile.objects.filter(
+                name=stream_target,
+                locked=False,
+            ).first()
+
+            if existing_stream:
+                stream_profile = existing_stream
+                stream_profile.command = str(
+                    Path(self.dst_dir) / p["filename"]
+                )
+                stream_profile.parameters = stream_parameters
+                stream_profile.is_active = True
+                stream_profile.save()
+            else:
+                stream_profile = StreamProfile(
+                    name=stream_target,
+                    command=str(
+                        Path(self.dst_dir) / p["filename"]
+                    ),
+                    parameters=stream_parameters,
+                    is_active=True,
+                    locked=False,
+                )
+                stream_profile.save()
+
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": (
+                    f"Could not create Stream Profile: "
+                    f"{type(e).__name__}: {e}"
+                ),
+            }
+
+        # ---------------------------------------------------------------------
+        # OUTPUT PROFILE CREATE / UPDATE
+        # ---------------------------------------------------------------------
+        try:
+            existing_output = OutputProfile.objects.filter(
+                name=output_target,
+                locked=False,
+            ).first()
+
+            if existing_output:
+                output_profile = existing_output
+                output_profile.command = "ffmpeg"
+                output_profile.parameters = output_parameters
+                output_profile.is_active = True
+                output_profile.save()
+            else:
+                output_profile = OutputProfile(
+                    name=output_target,
+                    command="ffmpeg",
+                    parameters=output_parameters,
+                    is_active=True,
+                    locked=False,
+                )
+                output_profile.save()
+
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": (
+                    f"Could not create Output Profile: "
+                    f"{type(e).__name__}: {e}"
+                ),
+            }
+
+        # ---------------------------------------------------------------------
+        # NATIVE DISPATCHARR STREAM PROFILE DEFAULT
+        # ---------------------------------------------------------------------
+        try:
+            CoreSettings._update_group(
+                "stream_settings",
+                "Stream Settings",
+                {
+                    "default_stream_profile": stream_profile.id
+                },
+            )
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": (
+                    f"Profiles synchronized, but Stream Profile default "
+                    f"could not be changed: "
+                    f"{type(e).__name__}: {e}"
+                ),
+            }
+
+        # ---------------------------------------------------------------------
+        # NATIVE DISPATCHARR LIVE OUTPUT PROFILE DEFAULT
+        # ---------------------------------------------------------------------
+        try:
+            user = User.objects.get(id=1)
+
+            custom_properties = dict(user.custom_properties or {})
+            custom_properties["output_profile"] = output_profile.id
+
+            user.custom_properties = custom_properties
+            user.save(update_fields=["custom_properties"])
+
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": (
+                    f"Profiles synchronized and Stream Profile default "
+                    f"changed, but Output Profile default could not be "
+                    f"changed: {type(e).__name__}: {e}"
+                ),
+            }
+
+        return {
+            "status": "ok",
+            "message": (
+                f"Profilarr synchronized: {stream_target} | "
+                f"{output_target} | "
+                f"Stream Default: {stream_profile.id} | "
+                f"Output Default: {output_profile.id} | "
+                f"Cache: {cache} ms"
+            ),
+        }
 
     def stop(self, context):
         run_dir = Path(self.dst_dir) / "run"
+
         for pid_file in run_dir.glob("*.pid"):
             with contextlib.suppress(Exception):
-                os.kill(int(pid_file.read_text().strip()), signal.SIGTERM)
+                os.kill(
+                    int(pid_file.read_text().strip()),
+                    signal.SIGTERM,
+                )
+
             with contextlib.suppress(OSError):
                 pid_file.unlink()
 
     def run(self, action, params, context):
         self.settings = context.get("settings", {}) or {}
+
         if action == "generate_profile":
             return self._generate_profile()
-        if action == "reinstall":
-            return self._reinstall()
-        return {"status": "error", "message": f"Unknown action: {action}"}
+
+        return {
+            "status": "error",
+            "message": f"Unknown action: {action}",
+        }
