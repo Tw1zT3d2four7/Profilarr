@@ -480,22 +480,23 @@ class Plugin:
             }
 
         # ---------------------------------------------------------------------
-        # NATIVE DISPATCHARR STREAM PROFILE DEFAULT
+        # NATIVE DISPATCHARR STREAM PROFILE + HDHR OUTPUT PROFILE DEFAULTS
         # ---------------------------------------------------------------------
         try:
             CoreSettings._update_group(
                 "stream_settings",
                 "Stream Settings",
                 {
-                    "default_stream_profile": stream_profile.id
+                    "default_stream_profile": stream_profile.id,
+                    "hdhr_output_profile_id": output_profile.id,
                 },
             )
         except Exception as e:
             return {
                 "status": "error",
                 "message": (
-                    f"Profiles synchronized, but Stream Profile default "
-                    f"could not be changed: "
+                    f"Profiles synchronized, but Stream Profile / HDHR "
+                    f"Output Profile defaults could not be changed: "
                     f"{type(e).__name__}: {e}"
                 ),
             }
@@ -529,6 +530,7 @@ class Plugin:
                 f"{output_target} | "
                 f"Stream Default: {stream_profile.id} | "
                 f"Output Default: {output_profile.id} | "
+                f"HDHR Output: {output_profile.id} | "
                 f"Cache: {cache} ms"
             ),
         }
