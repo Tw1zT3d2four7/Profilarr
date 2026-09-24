@@ -125,6 +125,11 @@ def terminate(proc):
 
 
 def video_args(v, fps="copy"):
+    """Return (input_args, output_args) for the given video encoder.
+
+    input_args  - hardware-accel / device options that MUST precede -i.
+    output_args - encoder, filter, and metadata options that come after -i.
+    """
     enc, family = VIDEO_ENGINES[v]
 
     if enc == "copy":
@@ -133,16 +138,17 @@ def video_args(v, fps="copy"):
                 "fps override requires a video encoder, not copy"
             )
 
-        return ["-c:v", "copy"]
+        return [], ["-c:v", "copy"]
 
-    args = []
+    input_args = []
+    output_args = []
 
     # =========================================================================
     # CORE HARDWARE ACCELERATION ENGINE TRACKS
     # =========================================================================
 
     if family == "nvenc":
-        args += [
+        output_args += [
             "-c:v",
             enc,
             "-preset",
@@ -158,7 +164,7 @@ def video_args(v, fps="copy"):
         ]
 
     elif family == "amf":
-        args += [
+        output_args += [
             "-c:v",
             enc,
             "-quality",
@@ -178,13 +184,21 @@ def video_args(v, fps="copy"):
         # Forces immediate initialization of the QuickSync hardware
         # environment before opening codecs, bypassing the internal
         # device-probing delay that triggers provider 404 drops.
-        args += [
+        #
+        # -init_hw_device, -hwaccel, and -hwaccel_device are INPUT
+        # options -- they MUST appear before -i <url>.  Placing them
+        # after -i causes FFmpeg to treat them as output options for
+        # pipe:1, producing:
+        #   "Option hwaccel cannot be applied to output url pipe:1"
+        input_args += [
             "-init_hw_device",
             "qsv=qsv",
             "-hwaccel",
             "qsv",
             "-hwaccel_device",
             "qsv",
+        ]
+        output_args += [
             "-c:v",
             enc,
             "-preset",
@@ -206,7 +220,7 @@ def video_args(v, fps="copy"):
                 "and Intel profiles"
             )
 
-        args += [
+        output_args += [
             "-c:v",
             enc,
             "-preset",
@@ -239,7 +253,7 @@ def video_args(v, fps="copy"):
         # QSV handles framerate alterations natively within
         # the hwaccel engine pipeline via vpp_qsv.
         if family == "qsv":
-            args += [
+            output_args += [
                 "-vf",
                 f"vpp_qsv=fps={rate}",
                 "-fps_mode",
@@ -250,7 +264,7 @@ def video_args(v, fps="copy"):
                 gop,
             ]
         else:
-            args += [
+            output_args += [
                 "-vf",
                 f"fps={rate}",
                 "-fps_mode",
@@ -264,7 +278,7 @@ def video_args(v, fps="copy"):
     # --- Profile Metadata Flags ---
 
     if enc.startswith("h264_") or enc == "libx264":
-        args += [
+        output_args += [
             "-profile:v",
             "high",
             "-pix_fmt",
@@ -272,12 +286,12 @@ def video_args(v, fps="copy"):
         ]
 
     elif enc.startswith("hevc_") or enc == "libx265":
-        args += [
+        output_args += [
             "-pix_fmt",
             "yuv420p",
         ]
 
-    return args
+    return input_args, output_args
 
 
 def audio_args(a):
@@ -335,6 +349,8 @@ def ffmpeg_cmd(
             "not copy"
         )
 
+    video_input, video_output = video_args(video, fps)
+
     c = [
         "ffmpeg",
         "-hide_banner",
@@ -358,6 +374,12 @@ def ffmpeg_cmd(
         "2M",
         "-analyzeduration",
         "1M",
+    ]
+
+    # Hardware-accel / device input options must precede -i.
+    c += video_input
+
+    c += [
         "-i",
         url,
         "-map",
@@ -368,7 +390,8 @@ def ffmpeg_cmd(
         "-dn",
     ]
 
-    c += video_args(video, fps)
+    # Encoder, filter, and metadata output options follow -i.
+    c += video_output
     c += audio_args(audio)
 
     c += [
