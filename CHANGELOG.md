@@ -2,7 +2,7 @@
 
 All notable changes to Profilarr are documented here.
 
-## [2.1.5] - 2026-09-23
+## [2.1.6] - 2026-09-23
 
 ### Changed
 
