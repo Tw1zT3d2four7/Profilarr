@@ -351,14 +351,15 @@ def ffmpeg_cmd(
 
     video_input, video_output = video_args(video, fps)
 
+    lower_url = url.lower()
+    hls_input = ".m3u" in lower_url or "m3u8" in lower_url
+
     c = [
         "ffmpeg",
         "-hide_banner",
         "-user_agent",
         ua,
         "-reconnect",
-        "1",
-        "-reconnect_at_eof",
         "1",
         "-reconnect_streamed",
         "1",
@@ -371,10 +372,16 @@ def ffmpeg_cmd(
         "-fflags",
         "+discardcorrupt+genpts+igndts",
         "-probesize",
-        "2M",
+        "5M",
         "-analyzeduration",
-        "1M",
+        "5M",
     ]
+
+    if not hls_input:
+        c += [
+            "-reconnect_at_eof",
+            "1",
+        ]
 
     # Hardware-accel / device input options must precede -i.
     c += video_input

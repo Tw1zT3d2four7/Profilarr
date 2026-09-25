@@ -2,6 +2,23 @@
 
 All notable changes to Profilarr are documented here.
 
+## [2.1.7] - 2026-09-25
+
+### Fixed
+
+* HLS sources (`.m3u8` / `.m3u` URLs) no longer hang at startup with an
+  empty buffer and `Will reconnect at <playlist size>, error=End of file`
+  in the logs. `-reconnect_at_eof` treats the normal end of an HLS
+  playlist or segment as a dropped connection and re-requests the master
+  playlist forever, so no media is ever downloaded. The flag is now only
+  applied to non-HLS URLs, where EOF really does indicate a dropped live
+  TS source. Other reconnect options are unchanged.
+* Increased the FFmpeg probe budget from `-probesize 2M -analyzeduration 1M`
+  to `5M` / `5M`. The smaller budget failed to resolve HE-AAC (implicit
+  SBR) audio parameters on multi-variant HLS masters, producing
+  `Could not find codec parameters ... unspecified sample rate` and
+  failing Audio: Copy profiles with `[mpegts] sample rate not set`.
+
 ## [2.1.6] - 2026-09-23
 
 ### Changed
